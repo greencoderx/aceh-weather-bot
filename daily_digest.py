@@ -1,28 +1,43 @@
 import tweepy
 import os
+from datetime import datetime
 
-# X API keys
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
+# X API v2 credentials
+BEARER_TOKEN = os.getenv("BEARER_TOKEN")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 ACCESS_SECRET = os.getenv("ACCESS_SECRET")
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
 
-auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
-api = tweepy.API(auth, wait_on_rate_limit=True)
+client = tweepy.Client(
+    bearer_token=BEARER_TOKEN,
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_SECRET,
+    wait_on_rate_limit=True
+)
 
 DAILY_FILE = "daily_tweets.txt"
 HASHTAGS = ["#AcehWeather", "#BMKG", "#CuacaAceh", "#InfoCuaca", "#AcehSiaga"]
+LOG_FILE = "bot.log"
+
+def log(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {message}\n")
+    print(f"[{timestamp}] {message}")
 
 def append_hashtags(text):
     return text + " " + " ".join(HASHTAGS)
 
 def post_daily_digest():
+    log("Starting daily digest.")
     try:
         with open(DAILY_FILE, "r", encoding="utf-8") as f:
             content = f.read().strip()
 
         if content:
-            # Split into chunks if too long for a tweet (max 280 chars)
             chunk_size = 270 - len(" ".join(HASHTAGS)) - 1
             lines = content.split("\n---\n")
             tweet_chunks = []
@@ -36,18 +51,20 @@ def post_daily_digest():
             if current_chunk:
                 tweet_chunks.append(current_chunk.strip())
 
-            # Post each chunk as a separate tweet
             for chunk in tweet_chunks:
-                api.update_status(append_hashtags(chunk))
-            print("Daily digest posted!")
-
-            # Clear file for next day
+                try:
+                    client.create_tweet(text=append_hashtags(chunk))
+                    log("Posted digest tweet successfully.")
+                except Exception as e:
+                    log(f"Error posting digest tweet: {e}")
+            
             open(DAILY_FILE, "w").close()
+            log("Daily digest completed and file cleared.")
         else:
-            print("No tweets to post today.")
+            log("No tweets to post today for daily digest.")
 
     except FileNotFoundError:
-        print("No daily file found.")
+        log("Daily file not found, nothing to post.")
 
 if __name__ == "__main__":
     post_daily_digest()
