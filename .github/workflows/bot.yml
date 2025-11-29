@@ -2,8 +2,8 @@ name: Aceh Weather Bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # Run every 5 minutes
-  workflow_dispatch: # Allow manual run
+    - cron: "*/5 * * * *" # every 5 minutes
+  workflow_dispatch:
 
 jobs:
   run-bot:
@@ -27,4 +27,5 @@ jobs:
           API_SECRET: ${{ secrets.API_SECRET }}
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           ACCESS_SECRET: ${{ secrets.ACCESS_SECRET }}
+          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
         run: python bot.py
