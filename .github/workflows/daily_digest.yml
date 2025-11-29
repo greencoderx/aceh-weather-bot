@@ -1,4 +1,4 @@
-name: Daily Aceh Digest
+name: Daily Aceh Digest v2
 
 on:
   schedule:
@@ -8,23 +8,16 @@ on:
 jobs:
   post-digest:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.x'
-
-      - name: Install dependencies
-        run: pip install tweepy
-
-      - name: Post Daily Digest
+      - run: pip install tweepy
+      - run: python daily_digest.py
         env:
+          BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
           API_KEY: ${{ secrets.API_KEY }}
           API_SECRET: ${{ secrets.API_SECRET }}
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           ACCESS_SECRET: ${{ secrets.ACCESS_SECRET }}
-        run: python daily_digest.py
