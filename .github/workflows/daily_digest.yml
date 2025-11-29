@@ -1,0 +1,30 @@
+name: Daily Aceh Digest
+
+on:
+  schedule:
+    - cron: "0 20 * * *"  # 8 PM UTC daily
+  workflow_dispatch:
+
+jobs:
+  post-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install tweepy
+
+      - name: Post Daily Digest
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          API_SECRET: ${{ secrets.API_SECRET }}
+          ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+          ACCESS_SECRET: ${{ secrets.ACCESS_SECRET }}
+        run: python daily_digest.py
