@@ -6,7 +6,7 @@ API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 ACCESS_SECRET = os.getenv("ACCESS_SECRET")
-BEARER_TOKEN = os.getenv("BEARER_TOKEN")  # new required for v2
+BEARER_TOKEN = os.getenv("BEARER_TOKEN")  # required for v2
 
 # Authenticate v2 client
 client = tweepy.Client(
@@ -17,29 +17,51 @@ client = tweepy.Client(
     access_token_secret=ACCESS_SECRET
 )
 
-# Numeric user ID of @infoBMKG
-# You can find this via: https://tweeterid.com
-INFO_BMKG_ID = "1101026756120193025"  # example ID
+TARGET_USERNAME = "infoBMKG"
+
+def get_user_id(username):
+    """Fetch numeric user ID for the given username"""
+    try:
+        user = client.get_user(username=username)
+        return user.data.id
+    except Exception as e:
+        print("Error fetching user ID:", e)
+        return None
 
 def main():
-    # Get the 5 most recent tweets
-    response = client.get_users_tweets(
-        id=INFO_BMKG_ID,
-        max_results=5,
-        tweet_fields=["id", "text"]
-    )
+    user_id = get_user_id(TARGET_USERNAME)
+    if not user_id:
+        print("Cannot fetch user ID. Exiting.")
+        return
 
-    if response.data is None:
+    # Get recent tweets from the user
+    try:
+        response = client.get_users_tweets(
+            id=user_id,
+            max_results=5,
+            tweet_fields=["id", "text"]
+        )
+    except Exception as e:
+        print("Error fetching tweets:", e)
+        return
+
+    if not response.data:
         print("No tweets found")
         return
 
     for tweet in response.data:
-        try:
-            # Retweet
-            client.retweet(tweet.id)
-            print("Retweeted:", tweet.text[:80])
-        except tweepy.TweepyException as e:
-            print("Error retweeting:", e)
+        text = tweet.text
+        if "Aceh" in text or "aceh" in text:
+            try:
+                client.retweet(tweet.id)
+                print("Retweeted:", text[:80])
+            except tweepy.TweepyException as e:
+                if "You have already retweeted this Tweet" in str(e):
+                    print("Already retweeted:", text[:80])
+                else:
+                    print("Error retweeting:", e)
+        else:
+            print("Skipped tweet (not Aceh-related):", text[:80])
 
 if __name__ == "__main__":
     main()
