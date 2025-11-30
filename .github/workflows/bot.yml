@@ -15,7 +15,7 @@ jobs:
       
       # Step 1: Download the cached IDs from the previous run
       - name: Download User IDs Cache
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v4 # <<< FIXED: Changed from v3 to v4
         with:
           name: source-user-ids-cache
           path: .
@@ -26,7 +26,7 @@ jobs:
           
       - run: pip install tweepy
       
-      # Step 2: Run the bot. The bot will load IDs from the downloaded file.
+      # Step 2: Run the bot script
       - name: Run Bot Script
         run: python bot.py
         env:
@@ -38,9 +38,8 @@ jobs:
           
       # Step 3: Upload the IDs file (in case they were newly fetched or updated)
       - name: Upload User IDs Cache
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # <<< FIXED: Changed from v3 to v4
         with:
           name: source-user-ids-cache
           path: source_ids.json
-          # Don't fail the job if the file hasn't been created yet (first run)
           if-no-files-found: ignore
