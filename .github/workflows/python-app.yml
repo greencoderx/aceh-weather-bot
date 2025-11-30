@@ -1,0 +1,9 @@
+name: Run Aceh Weather Bot
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
