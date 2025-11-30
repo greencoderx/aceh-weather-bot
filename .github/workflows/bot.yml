@@ -2,8 +2,8 @@ name: Aceh Weather Bot v2
 
 on:
   schedule:
-    # Runs every 15 minutes to stay well within API rate limits
-    - cron: "*/15 * * * *" 
+    # Changed to run every 30 minutes to reduce API usage (10 calls/hour vs 20 calls/hour previously)
+    - cron: "*/30 * * * *" 
   workflow_dispatch:
 
 jobs:
@@ -12,14 +12,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       
-      # Step 1: Download the cached IDs from the previous run (using v4)
+      # Step 1: Download the cached IDs (uses v4, and continues on error for the first run)
       - name: Download User IDs Cache
         uses: actions/download-artifact@v4
         with:
           name: source-user-ids-cache
           path: .
-        # Use continue-on-error: true to prevent failure on the first run when the artifact doesn't exist
-        continue-on-error: true
+        continue-on-error: true # Prevents failure on the initial run when the artifact is missing
       
       - uses: actions/setup-python@v4
         with:
@@ -37,11 +36,10 @@ jobs:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           ACCESS_SECRET: ${{ secrets.ACCESS_SECRET }}
           
-      # Step 3: Upload the IDs file for the next run (using v4)
+      # Step 3: Upload the IDs file for the next run (uses v4)
       - name: Upload User IDs Cache
         uses: actions/upload-artifact@v4
         with:
           name: source-user-ids-cache
           path: source_ids.json
-          # Ensures the job doesn't fail if the file wasn't created (e.g., due to an earlier error)
           if-no-files-found: ignore
