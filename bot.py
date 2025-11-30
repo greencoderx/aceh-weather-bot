@@ -1,26 +1,22 @@
-import tweepy
 import os
+import tweepy
 import time
-import requests
+from datetime import datetime, timedelta
 
-### --- Setup Global Timeout for Tweepy --- ###
-session = requests.Session()
-session.request = requests.Session().request
-session.timeout = 10  # 10 seconds timeout
-
-### --- Setup Tweepy Client (Essential Tier Compatible) --- ###
-client = tweepy.Client(
-    bearer_token=os.getenv("BEARER_TOKEN"),
-    consumer_key=os.getenv("API_KEY"),
-    consumer_secret=os.getenv("API_SECRET"),
-    access_token=os.getenv("ACCESS_TOKEN"),
-    access_token_secret=os.getenv("ACCESS_SECRET"),
-    wait_on_rate_limit=True,
-    session=session
+# Authenticate using OAuth 1.0a (READ + WRITE)
+auth = tweepy.OAuth1UserHandler(
+    os.getenv("API_KEY"),
+    os.getenv("API_SECRET"),
+    os.getenv("ACCESS_TOKEN"),
+    os.getenv("ACCESS_SECRET")
 )
 
-### --- Source Accounts (Usernames) --- ###
-SOURCE_USERNAMES = [
+api = tweepy.API(auth)
+
+# ------------------------------
+# SOURCE ACCOUNTS
+# ------------------------------
+SOURCE_ACCOUNTS = [
     "infoBMKG",
     "BMKG_ACEH",
     "BMKG_Official",
@@ -28,6 +24,18 @@ SOURCE_USERNAMES = [
     "BPBD_Aceh"
 ]
 
-### --- Aceh Keywords --- ###
+# ------------------------------
+# KEYWORDS FOR ALL ACEH REGIONS
+# ------------------------------
 ACEH_KEYWORDS = [
-    "Aceh", "Banda Aceh", "Aceh Besar", "Pidie", "Pidie Jaya", "Bireuen",
+    "aceh", "banda aceh", "sabang", "lhokseumawe", "langsa", "subulussalam",
+    "aceh besar", "pidie", "pidie jaya", "aceh utara", "aceh timur",
+    "aceh tamiang", "aceh tengah", "aceh tenggara", "aceh selatan",
+    "aceh singkil", "aceh jaya", "aceh barat", "aceh barat daya",
+    "gayo lues", "bener meriah", "nagan raya", "simeulue"
+]
+
+# ------------------------------
+# HASHTAGS FOR VISIBILITY
+# ------------------------------
+HAS
