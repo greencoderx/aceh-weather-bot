@@ -2,44 +2,33 @@ name: Aceh Weather Bot v2
 
 on:
   schedule:
-    # Changed to run every 30 minutes to reduce API usage (10 calls/hour vs 20 calls/hour previously)
-    - cron: "*/30 * * * *" 
+    - cron: "*/5 * * * *"
   workflow_dispatch:
+
+concurrency:
+  group: "aceh-weather-bot"
+  cancel-in-progress: true
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 5  # hard stop if something hangs
+
     steps:
-      - uses: actions/checkout@v3
-      
-      # Step 1: Download the cached IDs (uses v4, and continues on error for the first run)
-      - name: Download User IDs Cache
-        uses: actions/download-artifact@v4
-        with:
-          name: source-user-ids-cache
-          path: .
-        continue-on-error: true # Prevents failure on the initial run when the artifact is missing
-      
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
-          
-      - run: pip install tweepy
-      
-      # Step 2: Run the bot script
-      - name: Run Bot Script
-        run: python bot.py
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install tweepy requests
+
+      - name: Run bot
         env:
           BEARER_TOKEN: ${{ secrets.BEARER_TOKEN }}
           API_KEY: ${{ secrets.API_KEY }}
           API_SECRET: ${{ secrets.API_SECRET }}
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
           ACCESS_SECRET: ${{ secrets.ACCESS_SECRET }}
-          
-      # Step 3: Upload the IDs file for the next run (uses v4)
-      - name: Upload User IDs Cache
-        uses: actions/upload-artifact@v4
-        with:
-          name: source-user-ids-cache
-          path: source_ids.json
-          if-no-files-found: ignore
+        run: python bot.py
