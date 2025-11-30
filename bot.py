@@ -83,7 +83,6 @@ def get_user_ids(usernames):
         try:
             user = client.get_user(username=username)
             if user.data:
-                # Store as string for JSON consistency, although tweepy handles it fine either way
                 user_ids.append(str(user.data.id)) 
                 log(f"Fetched ID for {username}: {user.data.id}")
             else:
@@ -112,6 +111,7 @@ def main():
 
     for user_id in SOURCE_IDS:
         try:
+            # This is the rate-limited call. We fetch the latest 5 tweets.
             tweets = client.get_users_tweets(
                 id=user_id,
                 max_results=5,
@@ -122,16 +122,14 @@ def main():
                 for tweet in tweets.data:
                     if is_aceh_related(tweet.text):
                         try:
-                            # Attempt to retweet
                             client.retweet(tweet.id)
                             save_for_digest(tweet.text)
                             log(f"Retweeted tweet {tweet.id} from user {user_id}")
                         except tweepy.errors.Forbidden as e:
-                            # Catch the specific error for already retweeted tweets
+                            # Handle the case where the tweet was already retweeted.
                             if "You have already retweeted this Tweet" in str(e):
                                 log(f"Tweet {tweet.id} from user {user_id} was already retweeted. Skipping.")
                             else:
-                                # Re-raise or log other Forbidden errors (e.g., protected user)
                                 log(f"Error retweeting tweet {tweet.id}: {e}")
                         except Exception as e:
                             log(f"General error retweeting tweet {tweet.id}: {e}")
