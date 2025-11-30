@@ -1,21 +1,23 @@
 import os
-import tweepy
 import time
-from datetime import datetime, timedelta
+import requests
+from bs4 import BeautifulSoup
+import tweepy
 
-# Authenticate using OAuth 1.0a (READ + WRITE)
-auth = tweepy.OAuth1UserHandler(
-    os.getenv("API_KEY"),
-    os.getenv("API_SECRET"),
-    os.getenv("ACCESS_TOKEN"),
-    os.getenv("ACCESS_SECRET")
-)
+# ==============================
+# X API Credentials
+# ==============================
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("ACCESS_SECRET")
 
+auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
 api = tweepy.API(auth)
 
-# ------------------------------
-# SOURCE ACCOUNTS
-# ------------------------------
+# ==============================
+# Source accounts to scrape
+# ==============================
 SOURCE_ACCOUNTS = [
     "infoBMKG",
     "BMKG_ACEH",
@@ -24,76 +26,95 @@ SOURCE_ACCOUNTS = [
     "BPBD_Aceh"
 ]
 
-# ------------------------------
-# KEYWORDS FOR ALL ACEH REGIONS
-# ------------------------------
-ACEH_KEYWORDS = [
-    "aceh", "banda aceh", "sabang", "lhokseumawe", "langsa", "subulussalam",
-    "aceh besar", "pidie", "pidie jaya", "aceh utara", "aceh timur",
-    "aceh tamiang", "aceh tengah", "aceh tenggara", "aceh selatan",
-    "aceh singkil", "aceh jaya", "aceh barat", "aceh barat daya",
-    "gayo lues", "bener meriah", "nagan raya", "simeulue"
-]
+# ==============================
+# Storage for last tweet
+# ==============================
+STATE_FILE = "last_tweets.txt"
 
-# ------------------------------
-# HASHTAGS FOR VISIBILITY
-# ------------------------------
-HASHTAGS = [
-    "#Aceh", "#InfoAceh", "#BMKG", "#CuacaAceh", "#PeringatanDini",
-    "#BencanaAceh", "#Gempa", "#HujanLebat", "#PeringatanCuaca"
-]
+def load_last_tweets():
+    if not os.path.exists(STATE_FILE):
+        return {}
+    with open(STATE_FILE, "r") as f:
+        lines = f.readlines()
+    data = {}
+    for line in lines:
+        user, tweet_id = line.strip().split(",")
+        data[user] = tweet_id
+    return data
 
-# ------------------------------
-# MEMORY FILE FOR LAST TWEET
-# ------------------------------
-LAST_ID_FILE = "last_seen_id.txt"
+def save_last_tweets(data):
+    with open(STATE_FILE, "w") as f:
+        for user, tweet_id in data.items():
+            f.write(f"{user},{tweet_id}\n")
 
-def load_last_seen():
-    if not os.path.exists(LAST_ID_FILE):
-        return 0
-    with open(LAST_ID_FILE, "r") as f:
-        return int(f.read().strip())
+# ==============================
+# Scrape a user's latest tweet
+# ==============================
+def scrape_latest_tweet(username):
+    url = f"https://x.com/{username}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+    }
 
-def save_last_seen(tweet_id):
-    with open(LAST_ID_FILE, "w") as f:
-        f.write(str(tweet_id))
+    r = requests.get(url, headers=headers, timeout=10)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-# ------------------------------
-# FETCH + POST LOGIC
-# ------------------------------
-def fetch_and_post():
-    last_seen_id = load_last_seen()
+    # Find tweet text (simple pattern)
+    tweet_containers = soup.find_all("div", attrs={"data-testid": "tweet"})
+
+    if not tweet_containers:
+        print(f"❌ Could not find any tweets for {username}")
+        return None, None
+
+    first_tweet = tweet_containers[0]
+
+    tweet_text_div = first_tweet.find("div", {"lang": True})
+    tweet_text = tweet_text_div.get_text(strip=True) if tweet_text_div else ""
+
+    tweet_id = first_tweet.get("data-tweet-id")
+    if not tweet_id:
+        tweet_id = str(int(time.time()))  # fallback
+
+    return tweet_id, tweet_text
+
+
+# ==============================
+# Main bot logic
+# ==============================
+def run_bot():
+    print("🚀 Aceh Weather Bot (Scraper Version) Started")
+
+    last_tweets = load_last_tweets()
 
     for account in SOURCE_ACCOUNTS:
+        print(f"\n🔍 Checking {account} ...")
+
         try:
-            print(f"Checking tweets from {account}...")
-            tweets = api.user_timeline(
-                screen_name=account,
-                since_id=last_seen_id,
-                tweet_mode="extended",
-                count=10
-            )
-
-            for tweet in reversed(tweets):
-                text_lower = tweet.full_text.lower()
-
-                if any(keyword in text_lower for keyword in ACEH_KEYWORDS):
-                    print(f"Matched tweet from {account}: {tweet.id}")
-
-                    hashtags_text = " ".join(HASHTAGS)
-                    final_text = f"{tweet.full_text}\n\nSource: @{account}\n{hashtags_text}"
-
-                    api.update_status(final_text)
-                    save_last_seen(tweet.id)
-
+            tweet_id, text = scrape_latest_tweet(account)
         except Exception as e:
-            print(f"Error fetching tweets from {account}: {e}")
+            print(f"❌ Error scraping {account}: {e}")
+            continue
 
-# ------------------------------
-# MAIN LOOP
-# ------------------------------
+        if not tweet_id or not text:
+            print(f"⚠ No tweet found for {account}")
+            continue
+
+        # Check if new tweet
+        if account in last_tweets and last_tweets[account] == tweet_id:
+            print(f"⏭ No new tweet from {account}")
+            continue
+
+        # New tweet found → Repost
+        try:
+            print(f"🔁 Reposting from {account}: {text[:50]}...")
+            api.update_status(f"Repost from @{account}:\n\n{text}")
+            last_tweets[account] = tweet_id
+        except Exception as e:
+            print(f"❌ Error reposting: {e}")
+
+    save_last_tweets(last_tweets)
+    print("\n✅ Bot finished!")
+
+
 if __name__ == "__main__":
-    print("🚀 Aceh Weather Bot started...")
-    while True:
-        fetch_and_post()
-        time.sleep(30)
+    run_bot()
