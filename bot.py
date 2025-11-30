@@ -1,6 +1,7 @@
 import tweepy
 import os
 from datetime import datetime
+import json # New import for caching
 
 # X API v2 credentials from GitHub secrets
 BEARER_TOKEN = os.getenv("BEARER_TOKEN")
@@ -39,9 +40,10 @@ KEYWORDS = [
 # Hashtags for visibility
 HASHTAGS = ["#AcehWeather", "#BMKG", "#CuacaAceh", "#InfoCuaca", "#AcehSiaga"]
 
-# File to store daily tweets
+# File paths
 DAILY_FILE = "daily_tweets.txt"
 LOG_FILE = "bot.log"
+IDS_FILE = "source_ids.json" # New file for caching IDs
 
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -61,22 +63,54 @@ def append_hashtags(text):
 
 def get_user_ids(usernames):
     user_ids = []
+    
+    # 1. Try to load IDs from a file (Cache Hit)
+    if os.path.exists(IDS_FILE):
+        try:
+            with open(IDS_FILE, "r") as f:
+                cached_ids = json.load(f)
+                # Check if the cache is valid and contains IDs for all users
+                if isinstance(cached_ids, list) and len(cached_ids) == len(usernames):
+                    log("Successfully loaded source IDs from cache file.")
+                    return cached_ids
+                else:
+                    log("Cached IDs file was invalid/incomplete. Will fetch from API.")
+        except Exception as e:
+            log(f"Error reading/parsing {IDS_FILE}: {e}. Proceeding with API lookup.")
+
+    # 2. Fetch IDs from API (Cache Miss)
+    log("Fetching user IDs via X API (this only happens if cache is empty/invalid).")
     for username in usernames:
         try:
             user = client.get_user(username=username)
             if user.data:
-                user_ids.append(user.data.id)
+                user_ids.append(str(user.data.id)) # Store as string for JSON consistency
                 log(f"Fetched ID for {username}: {user.data.id}")
             else:
                 log(f"Could not fetch ID for {username}")
         except Exception as e:
             log(f"Error fetching {username}: {e}")
+
+    # 3. Cache the newly fetched IDs to the file
+    if len(user_ids) == len(usernames): # Only cache if all IDs were successfully retrieved
+        try:
+            with open(IDS_FILE, "w") as f:
+                json.dump(user_ids, f)
+            log(f"Successfully cached {len(user_ids)} IDs to {IDS_FILE}.")
+        except Exception as e:
+            log(f"Error writing to {IDS_FILE}: {e}")
+
     return user_ids
 
 def main():
     log("Bot started.")
+    # This will now use the cached IDs most of the time
     SOURCE_IDS = get_user_ids(SOURCE_USERNAMES)
     
+    if not SOURCE_IDS:
+        log("No source IDs available. Exiting bot.")
+        return
+
     for user_id in SOURCE_IDS:
         try:
             tweets = client.get_users_tweets(
@@ -87,19 +121,29 @@ def main():
 
             if tweets.data:
                 for tweet in tweets.data:
+                    # In a high-frequency bot, you might want a more sophisticated way to check if
+                    # a tweet has already been processed/retweeted to avoid redundant operations.
+                    
                     if is_aceh_related(tweet.text):
                         try:
                             client.retweet(tweet.id)
                             save_for_digest(tweet.text)
                             log(f"Retweeted tweet {tweet.id} from user {user_id}")
+                        except tweepy.errors.Forbidden as e:
+                            # Catching a specific error that occurs if the tweet is already retweeted
+                            if "You have already retweeted this Tweet" in str(e):
+                                log(f"Tweet {tweet.id} from user {user_id} was already retweeted. Skipping.")
+                            else:
+                                log(f"Error retweeting tweet {tweet.id}: {e}")
                         except Exception as e:
                             log(f"Error retweeting tweet {tweet.id}: {e}")
                     else:
                         log(f"Skipped tweet {tweet.id} (not Aceh related)")
             else:
-                log(f"No tweets found for user {user_id}")
+                log(f"No new tweets found for user {user_id}")
         except Exception as e:
             log(f"Error fetching tweets from user {user_id}: {e}")
+            
     log("Bot finished.\n")
 
 if __name__ == "__main__":
