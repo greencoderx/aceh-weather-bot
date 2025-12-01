@@ -1,137 +1,128 @@
-import os
-import json
-import requests
 import tweepy
+import os
 from datetime import datetime
 
-API_KEY = os.getenv("API_KEY")
-API_SECRET = os.getenv("API_SECRET")
-ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-ACCESS_SECRET = os.getenv("ACCESS_SECRET")
+print("=== Aceh Weather Bot Running ===")
+print(datetime.now())
 
-auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
-api = tweepy.API(auth)
+# -------------------------------------------------------
+# TWITTER CREDENTIALS
+# -------------------------------------------------------
+BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
-SOURCE_ACCOUNTS = [
-    "infoBMKG",
-    "BMKG_ACEH",
-    "BMKG_Official",
-    "BNPB_Indonesia",
-    "BPBAceh"
-]
+client = tweepy.Client(
+    bearer_token=BEARER_TOKEN,
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_SECRET,
+    wait_on_rate_limit=True
+)
 
+# -------------------------------------------------------
+# SOURCE ACCOUNTS TO MONITOR
+# -------------------------------------------------------
+SOURCE_ACCOUNTS = {
+    "infoBMKG": "250405606",         # BMKG
+    "BMKG_ACEH": "1316488859874965504",
+    "BMKG_Official": "253855545",    
+    "BNPB_Indonesia": "114547606",
+    "BPBAceh": "2724442720"
+}
+
+# -------------------------------------------------------
+# ACEH KEYWORDS (FULL LIST OF KABUPATEN + GEMPA TERMS)
+# -------------------------------------------------------
 ACEH_KEYWORDS = [
-    "Aceh", "Banda Aceh", "Aceh Besar", "Sabang", "Pidie", "Pidie Jaya", "Bireuen",
-    "Lhokseumawe", "Aceh Utara", "Aceh Timur", "Aceh Tamiang", "Langsa",
-    "Aceh Tengah", "Bener Meriah", "Aceh Barat", "Nagan Raya", "Aceh Jaya",
-    "Meulaboh", "Aceh Selatan", "Tapaktuan", "Aceh Singkil", "Subulussalam"
+    # Provinces / General
+    "ACEH", "NAD", "SERAMBI",
+
+    # Major cities
+    "BANDA ACEH", "LANGSA", "LHOKSEUMAWE", "SUBULUSSALAM", "SABANG",
+
+    # All districts (Kabupaten Aceh)
+    "ACEH BESAR", "PIDIE", "PIDIE JAYA", "BIREUEN", "BENER MERIAH",
+    "ACEH UTARA", "ACEH TIMUR", "ACEH TENGAH", "ACEH BARAT",
+    "ACEH BARAT DAYA", "ACEH SELATAN", "ACEH SINGKIL",
+    "ACEH TAMIANG", "ACEH TENGGARA", "ACEH JAYA", "GAYO LUES",
+    "NAGAN RAYA", "SIMEULUE",
+
+    # Specific locations BMKG often posts
+    "TAKENGON", "MEULABOH", "CALANG", "TAPAKTUAN",
+    "BLANGKEJEREN", "LHOKSEUMAWE", "IDI", "SIGLI", "LOTENG",
+
+    # Gempa terms
+    "GEMPA", "MAG", "M=.", "KEPUATAN", "TEKTONIK",
+    "PUSAT GEMPA", "KM", "BMKG"
 ]
 
-HASHTAGS = "#CuacaAceh #PeringatanDini #BMKG #Aceh"
+# Convert keywords to lowercase for matching
+ACEH_KEYWORDS = [k.lower() for k in ACEH_KEYWORDS]
 
-CACHE_FILE = "cache/last_ids.json"
+# -------------------------------------------------------
+# LOAD LAST RETWEETED TWEETS
+# -------------------------------------------------------
+LAST_FILE = "last_tweets.txt"
+if not os.path.exists(LAST_FILE):
+    open(LAST_FILE, "w").close()
 
+with open(LAST_FILE, "r") as f:
+    processed_ids = set(line.strip() for line in f if line.strip())
 
-def load_cache():
-    if not os.path.exists("cache"):
-        os.makedirs("cache")
-    if not os.path.isfile(CACHE_FILE):
-        return {}
-    return json.load(open(CACHE_FILE, "r"))
+# -------------------------------------------------------
+# CHECK EACH SOURCE ACCOUNT
+# -------------------------------------------------------
+def keyword_match(text):
+    text = text.lower()
+    return any(k in text for k in ACEH_KEYWORDS)
 
+def save_processed(tweet_id):
+    with open(LAST_FILE, "a") as f:
+        f.write(str(tweet_id) + "\n")
 
-def save_cache(data):
-    json.dump(data, open(CACHE_FILE, "w"))
+for username, user_id in SOURCE_ACCOUNTS.items():
+    try:
+        print(f"Checking {username}...")
 
+        tweets = client.get_users_tweets(
+            id=user_id,
+            max_results=5,
+            tweet_fields=["id", "text", "created_at"]
+        )
 
-last_ids = load_cache()
+        if not tweets.data:
+            continue
 
+        for t in tweets.data:
+            tid = str(t.id)
+            text = t.text
 
-def fetch_from_syndication(username):
-    url = f"https://cdn.syndication.twimg.com/timeline/profile?screen_name={username}"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json",
-    }
-
-    r = requests.get(url, headers=headers)
-    if r.status_code != 200:
-        print(f"Failed to fetch {username}: {r.status_code}")
-        return []
-
-    data = r.json()
-    if "tweets" not in data:
-        print(f"No tweets found for {username}")
-        return []
-
-    tweets = []
-
-    for t in data["tweets"]:
-        tweet_id = t.get("id_str")
-        text = t.get("text")
-        media_url = None
-
-        # check image
-        if "mediaDetails" in t and len(t["mediaDetails"]) > 0:
-            for m in t["mediaDetails"]:
-                if m.get("media_url_https"):
-                    media_url = m["media_url_https"]
-
-        tweets.append({
-            "id": tweet_id,
-            "text": text,
-            "image": media_url
-        })
-
-    return tweets
-
-
-def process_account(username):
-    print(f"Checking {username}...")
-    last_seen = last_ids.get(username)
-
-    tweets = fetch_from_syndication(username)
-    if not tweets:
-        print(f"No tweets for {username}")
-        return
-
-    new_tweets = []
-    for t in tweets:
-        if t["id"] == last_seen:
-            break
-        new_tweets.append(t)
-
-    if new_tweets:
-        new_tweets.reverse()
-        for t in new_tweets:
-
-            # Only post tweet if it contains Aceh-related keywords
-            if not any(k.lower() in t["text"].lower() for k in ACEH_KEYWORDS):
+            # Avoid duplicate processing
+            if tid in processed_ids:
                 continue
 
-            status = f"{t['text']}\n\n{HASHTAGS}"
+            # Keyword check
+            if not keyword_match(text):
+                continue
 
-            if t["image"]:
-                img = requests.get(t["image"])
-                with open("temp.jpg", "wb") as f:
-                    f.write(img.content)
-                api.update_status_with_media(status=status, filename="temp.jpg")
-                print(f"[POSTED WITH IMAGE] {username}")
-            else:
-                api.update_status(status=status)
-                print(f"[POSTED] {username}")
+            print(f"MATCH FOUND from @{username}:")
+            print(text)
+            print("Retweeting...")
 
-        last_ids[username] = tweets[0]["id"]
-        save_cache(last_ids)
+            try:
+                client.retweet(tid)
+                print("Retweeted successfully!")
+            except Exception as e:
+                print("Retweet error:", e)
 
+            processed_ids.add(tid)
+            save_processed(tid)
 
-def main():
-    print("=== Aceh Weather Bot Running ===")
-    print(datetime.now())
-    for acc in SOURCE_ACCOUNTS:
-        process_account(acc)
-    print("=== DONE ===")
+    except Exception as e:
+        print(f"Error checking {username}: {e}")
 
-
-if __name__ == "__main__":
-    main()
+print("=== DONE ===")
