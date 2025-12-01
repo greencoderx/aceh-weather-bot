@@ -1,30 +1,25 @@
 import os
 import json
 import requests
-from bs4 import BeautifulSoup
 import tweepy
 from datetime import datetime
 
-# Load credentials
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 ACCESS_SECRET = os.getenv("ACCESS_SECRET")
 
-# Tweepy client (Only posting works on Free tier)
 auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
 api = tweepy.API(auth)
 
-# Scrape URLs (official)
-SOURCE_ACCOUNTS = {
-    "infoBMKG": "https://x.com/infoBMKG",
-    "BMKG_ACEH": "https://x.com/BMKG_ACEH",
-    "BMKG_Official": "https://x.com/BMKG_Official",
-    "BNPB_Indonesia": "https://x.com/BNPB_Indonesia",
-    "BPBAceh": "https://x.com/BPBAceh",
-}
+SOURCE_ACCOUNTS = [
+    "infoBMKG",
+    "BMKG_ACEH",
+    "BMKG_Official",
+    "BNPB_Indonesia",
+    "BPBAceh"
+]
 
-# Aceh-related keywords
 ACEH_KEYWORDS = [
     "Aceh", "Banda Aceh", "Aceh Besar", "Sabang", "Pidie", "Pidie Jaya", "Bireuen",
     "Lhokseumawe", "Aceh Utara", "Aceh Timur", "Aceh Tamiang", "Langsa",
@@ -32,71 +27,72 @@ ACEH_KEYWORDS = [
     "Meulaboh", "Aceh Selatan", "Tapaktuan", "Aceh Singkil", "Subulussalam"
 ]
 
-# Hashtags appended to posts
 HASHTAGS = "#CuacaAceh #PeringatanDini #BMKG #Aceh"
 
-# Local cache for last tweet IDs
 CACHE_FILE = "cache/last_ids.json"
 
-# Load cache
+
 def load_cache():
     if not os.path.exists("cache"):
         os.makedirs("cache")
-
     if not os.path.isfile(CACHE_FILE):
         return {}
+    return json.load(open(CACHE_FILE, "r"))
 
-    with open(CACHE_FILE, "r") as f:
-        return json.load(f)
 
-# Save cache
 def save_cache(data):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(data, f)
+    json.dump(data, open(CACHE_FILE, "w"))
+
 
 last_ids = load_cache()
 
-# Scrape tweets from X public webpage
-def scrape_tweets(username, url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers)
 
+def fetch_from_syndication(username):
+    url = f"https://cdn.syndication.twimg.com/timeline/profile?screen_name={username}"
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json",
+    }
+
+    r = requests.get(url, headers=headers)
     if r.status_code != 200:
-        print(f"Error scraping {username}: HTTP {r.status_code}")
+        print(f"Failed to fetch {username}: {r.status_code}")
         return []
 
-    soup = BeautifulSoup(r.text, "lxml")
+    data = r.json()
+    if "tweets" not in data:
+        print(f"No tweets found for {username}")
+        return []
+
     tweets = []
 
-    for div in soup.find_all("div", attrs={"data-testid": "tweet"}):
-        text_block = div.find("div", {"data-testid": "tweetText"})
-        if not text_block:
-            continue
+    for t in data["tweets"]:
+        tweet_id = t.get("id_str")
+        text = t.get("text")
+        media_url = None
 
-        text = text_block.get_text(strip=True)
-        tweet_id = div.get("data-tweet-id")
-
-        # detect image URL (if exists)
-        image_tag = div.find("img", {"alt": "Image"})
-        image_url = image_tag["src"] if image_tag else None
+        # check image
+        if "mediaDetails" in t and len(t["mediaDetails"]) > 0:
+            for m in t["mediaDetails"]:
+                if m.get("media_url_https"):
+                    media_url = m["media_url_https"]
 
         tweets.append({
             "id": tweet_id,
             "text": text,
-            "image": image_url
+            "image": media_url
         })
 
     return tweets
 
 
-# Check for new filtered tweets
-def process_account(username, url):
+def process_account(username):
     print(f"Checking {username}...")
+    last_seen = last_ids.get(username)
 
-    last_seen = last_ids.get(username, None)
-    tweets = scrape_tweets(username, url)
-
+    tweets = fetch_from_syndication(username)
     if not tweets:
+        print(f"No tweets for {username}")
         return
 
     new_tweets = []
@@ -107,37 +103,33 @@ def process_account(username, url):
 
     if new_tweets:
         new_tweets.reverse()
-
         for t in new_tweets:
-            if any(k.lower() in t["text"].lower() for k in ACEH_KEYWORDS):
 
-                final_text = f"{t['text']}\n\n{HASHTAGS}"
+            # Only post tweet if it contains Aceh-related keywords
+            if not any(k.lower() in t["text"].lower() for k in ACEH_KEYWORDS):
+                continue
 
-                if t["image"]:  
-                    filename = "temp.jpg"
-                    img = requests.get(t["image"])
-                    with open(filename, "wb") as f:
-                        f.write(img.content)
-                    
-                    api.update_status_with_media(status=final_text, filename=filename)
-                    print(f"[POSTED WITH IMAGE] {username}")
-                else:
-                    api.update_status(status=final_text)
-                    print(f"[POSTED] {username}")
+            status = f"{t['text']}\n\n{HASHTAGS}"
 
-        # update last seen
+            if t["image"]:
+                img = requests.get(t["image"])
+                with open("temp.jpg", "wb") as f:
+                    f.write(img.content)
+                api.update_status_with_media(status=status, filename="temp.jpg")
+                print(f"[POSTED WITH IMAGE] {username}")
+            else:
+                api.update_status(status=status)
+                print(f"[POSTED] {username}")
+
         last_ids[username] = tweets[0]["id"]
         save_cache(last_ids)
 
 
-# MAIN RUN
 def main():
     print("=== Aceh Weather Bot Running ===")
     print(datetime.now())
-
-    for username, url in SOURCE_ACCOUNTS.items():
-        process_account(username, url)
-
+    for acc in SOURCE_ACCOUNTS:
+        process_account(acc)
     print("=== DONE ===")
 
 
