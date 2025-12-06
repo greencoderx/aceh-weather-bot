@@ -1,163 +1,141 @@
 import os
-import json
-import time
-import hashlib
 import logging
-import requests
-import tweepy
 from datetime import datetime
+import tweepy
+import requests
+from bs4 import BeautifulSoup
 
-# -----------------------------------------------------------
-# Logging setup
-# -----------------------------------------------------------
+# ===========================
+# Logging Setup
+# ===========================
 logging.basicConfig(
     filename="bot.log",
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 
-print("=== Aceh Weather Bot Running ===")
-print(datetime.now())
+logging.info("=== Aceh Weather Bot Starting ===")
 
-logging.info("Bot started")
-
-# -----------------------------------------------------------
-# Setup Twitter API
-# -----------------------------------------------------------
-api_key = os.getenv("TWITTER_API_KEY")
-api_secret = os.getenv("TWITTER_API_SECRET")
-access_token = os.getenv("TWITTER_ACCESS_TOKEN")
-access_secret = os.getenv("TWITTER_ACCESS_SECRET")
+# ===========================
+# Twitter API Authentication
+# ===========================
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
 client = tweepy.Client(
-    consumer_key=api_key,
-    consumer_secret=api_secret,
-    access_token=access_token,
-    access_token_secret=access_secret
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_SECRET
 )
 
-# -----------------------------------------------------------
-# Load/Save last post hash to avoid duplicates
-# -----------------------------------------------------------
-HASH_FILE = "last_hash.txt"
+# v1.1 API for media upload
+auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
+api_v1 = tweepy.API(auth)
 
-def get_last_hash():
-    if not os.path.exists(HASH_FILE):
-        return None
-    return open(HASH_FILE).read().strip()
+# ===========================
+# Helper: Load/Save Last Summary
+# ===========================
+LAST_FILE = "last_summary.txt"
 
-def save_hash(h):
-    with open(HASH_FILE, "w") as f:
-        f.write(h)
+def load_last_summary():
+    if not os.path.exists(LAST_FILE):
+        return ""
+    with open(LAST_FILE, "r") as f:
+        return f.read().strip()
 
-# -----------------------------------------------------------
-# Step 1: Fetch Weather Data from BMKG Public API
-# -----------------------------------------------------------
-def fetch_weather():
-    """
-    BMKG provides open data through:
-    https://data.bmkg.go.id/
-    We'll use one of the public JSON endpoints.
-    """
-    url = "https://data.bmkg.go.id/DataMKG/MEWS/DigitalForecast/DigitalForecast-Aceh.json"
+def save_last_summary(text):
+    with open(LAST_FILE, "w") as f:
+        f.write(text)
 
+# ===========================
+# Scrape BMKG Weather Summary
+# ===========================
+def get_bmkg_summary():
     try:
+        url = "https://www.bmkg.go.id/cuaca/prakiraan-cuaca-indonesia.bmkg?Prov=07"
         r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        logging.error(f"Failed to fetch BMKG data: {e}")
-        return None
+        soup = BeautifulSoup(r.text, "html.parser")
 
-# -----------------------------------------------------------
-# Step 2: Parse summary
-# -----------------------------------------------------------
-def summarize_weather(data):
-    try:
-        province = data["data"]["forecast"]["area"][0]
-        name = province["name"]
-        params = province["parameter"]
+        area = soup.select_one(".prakicu-kota h2")
+        weather = soup.select_one(".prakicu-kota img")
+        desc = soup.select_one(".prakicu-kota .keterangan")
 
-        weather = params[6]["timerange"][0]["value"][0]["#text"]
-        temp = params[5]["timerange"][0]["value"][0]["#text"]
+        if not area:
+            return None
 
-        summary = (
-            f"🌦️ *Prakiraan Cuaca Aceh*\n"
-            f"Wilayah: {name}\n"
-            f"Cuaca: {weather}\n"
-            f"Suhu: {temp}°C\n"
-            f"Sumber: BMKG"
-        )
+        location = area.text.strip()
+        detail = desc.text.strip() if desc else "Cuaca tidak tersedia"
+        image_url = weather["src"] if weather else None
 
-        return summary
+        summary = f"BMKG Aceh Update:\nLokasi: {location}\nCuaca: {detail}\nSumber: bmkg.go.id"
+        return summary, image_url
 
     except Exception as e:
-        logging.error(f"Failed to summarize weather: {e}")
+        logging.error(f"BMKG scrape error: {e}")
         return None
 
-# -----------------------------------------------------------
-# Step 3: Detect duplicate content
-# -----------------------------------------------------------
-def is_duplicate(text):
-    hash_val = hashlib.md5(text.encode()).hexdigest()
-    last = get_last_hash()
-    if last == hash_val:
-        return True
-    save_hash(hash_val)
-    return False
-
-# -----------------------------------------------------------
-# Step 4: Upload media (optional)
-# -----------------------------------------------------------
-def upload_media(image_path):
+# ===========================
+# Download Image (if any)
+# ===========================
+def download_image(url):
     try:
-        media = client.media_upload(filename=image_path)
-        return media.media_id
-    except Exception as e:
-        logging.error(f"Media upload failed: {e}")
+        r = requests.get(url)
+        filename = "weather.png"
+        with open(filename, "wb") as f:
+            f.write(r.content)
+        return filename
+    except:
         return None
 
-# -----------------------------------------------------------
-# Step 5: Post tweet
-# -----------------------------------------------------------
-def post_tweet(text, media_id=None):
+# ===========================
+# Post Tweet with Media
+# ===========================
+def post_tweet(text, media=None):
     try:
-        if media_id:
+        if media:
+            media_id = api_v1.media_upload(media).media_id_string
             client.create_tweet(text=text, media_ids=[media_id])
         else:
             client.create_tweet(text=text)
 
-        logging.info("Tweet posted successfully")
-        print("Tweet posted successfully")
-
+        logging.info(f"Tweet posted: {text[:50]}...")
+        print("Tweet posted")
     except Exception as e:
-        logging.error(f"Tweet failed: {e}")
-        print(f"Tweet failed: {e}")
+        logging.error(f"Tweet error: {e}")
+        print(f"Tweet error: {e}")
 
-# -----------------------------------------------------------
-# MAIN PROCESS
-# -----------------------------------------------------------
-def main():
-    data = fetch_weather()
-    if not data:
-        print("Failed to fetch weather")
-        return
-
-    summary = summarize_weather(data)
-    if not summary:
-        print("Failed to summarize")
-        return
-
-    print(summary)
-
-    if is_duplicate(summary):
-        print("Duplicate detected, skipping tweet.")
-        logging.info("Duplicate tweet skipped")
-        return
-
-    post_tweet(summary)
-
-
+# ===========================
+# MAIN
+# ===========================
 if __name__ == "__main__":
-    main()
+
+    logging.info("Running weather scrape task...")
+
+    result = get_bmkg_summary()
+    if not result:
+        print("No data received from BMKG")
+        exit()
+
+    summary, img = result
+
+    last = load_last_summary()
+
+    if summary == last:
+        print("⏭ No new update. Skipping.")
+        logging.info("Duplicate summary. Skipped.")
+        exit()
+
+    # Download weather icon if exists
+    img_path = download_image(img) if img else None
+
+    # Post tweet
+    post_tweet(summary, img_path)
+
+    # Save last posted summary
+    save_last_summary(summary)
+
     print("=== DONE ===")
+    logging.info("=== Task Completed ===")
