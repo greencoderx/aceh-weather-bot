@@ -1,19 +1,17 @@
 name: Aceh Weather Bot
 
 on:
-  schedule:
-    - cron: "*/20 * * * *"   # runs every 20 minutes
   workflow_dispatch:
-
-permissions:
-  contents: read
+  schedule:
+    - cron: "*/30 * * * *"
 
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
