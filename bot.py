@@ -19,10 +19,10 @@ logging.info("=== Aceh Weather Bot Starting ===")
 # ===========================
 # Twitter API Authentication
 # ===========================
-API_KEY = os.getenv("TWITTER_API_KEY")
-API_SECRET = os.getenv("TWITTER_API_SECRET")
-ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+API_KEY = os.getenv("API_KEY")
+API_SECRET = os.getenv("API_SECRET")
+ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("ACCESS_SECRET")
 
 client = tweepy.Client(
     consumer_key=API_KEY,
