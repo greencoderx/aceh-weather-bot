@@ -1,86 +1,163 @@
 import os
+import json
+import time
+import hashlib
+import logging
+import requests
 import tweepy
 from datetime import datetime
+
+# -----------------------------------------------------------
+# Logging setup
+# -----------------------------------------------------------
+logging.basicConfig(
+    filename="bot.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 print("=== Aceh Weather Bot Running ===")
 print(datetime.now())
 
-# Load credentials
-API_KEY = os.getenv("TWITTER_API_KEY")
-API_SECRET = os.getenv("TWITTER_API_SECRET")
-ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
-ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+logging.info("Bot started")
 
-# Authenticate
-auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
-api = tweepy.API(auth)
+# -----------------------------------------------------------
+# Setup Twitter API
+# -----------------------------------------------------------
+api_key = os.getenv("TWITTER_API_KEY")
+api_secret = os.getenv("TWITTER_API_SECRET")
+access_token = os.getenv("TWITTER_ACCESS_TOKEN")
+access_secret = os.getenv("TWITTER_ACCESS_SECRET")
 
-# Source accounts
-ACCOUNTS = [
-    "infoBMKG",
-    "BMKG_ACEH",
-    "BMKG_Official",
-    "BNPB_Indonesia",
-    "BPBAceh"
-]
+client = tweepy.Client(
+    consumer_key=api_key,
+    consumer_secret=api_secret,
+    access_token=access_token,
+    access_token_secret=access_secret
+)
 
-# Aceh-related keywords
-KEYWORDS = [
-    "aceh", "banda aceh", "pidie", "pidie jaya",
-    "bireuen", "lhokseumawe", "langsa", "aceh utara",
-    "aceh besar", "simeulue", "meulaboh", "aceh barat"
-]
+# -----------------------------------------------------------
+# Load/Save last post hash to avoid duplicates
+# -----------------------------------------------------------
+HASH_FILE = "last_hash.txt"
 
-# Track last tweets
-TRACK_FILE = "last_tweets.txt"
+def get_last_hash():
+    if not os.path.exists(HASH_FILE):
+        return None
+    return open(HASH_FILE).read().strip()
 
-if not os.path.exists(TRACK_FILE):
-    with open(TRACK_FILE, "w") as f:
-        f.write("")
+def save_hash(h):
+    with open(HASH_FILE, "w") as f:
+        f.write(h)
 
-def load_last():
-    data = {}
-    with open(TRACK_FILE, "r") as f:
-        for line in f:
-            if ":" in line:
-                user, tid = line.strip().split(":")
-                data[user] = int(tid)
-    return data
-
-def save_last(data):
-    with open(TRACK_FILE, "w") as f:
-        for user, tid in data.items():
-            f.write(f"{user}:{tid}\n")
-
-last_seen = load_last()
-
-# === MAIN LOOP ===
-for user in ACCOUNTS:
-    print(f"Checking {user}...")
+# -----------------------------------------------------------
+# Step 1: Fetch Weather Data from BMKG Public API
+# -----------------------------------------------------------
+def fetch_weather():
+    """
+    BMKG provides open data through:
+    https://data.bmkg.go.id/
+    We'll use one of the public JSON endpoints.
+    """
+    url = "https://data.bmkg.go.id/DataMKG/MEWS/DigitalForecast/DigitalForecast-Aceh.json"
 
     try:
-        tweets = api.user_timeline(screen_name=user, count=5, tweet_mode="extended")
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        return r.json()
     except Exception as e:
-        print(f"Error checking {user}: {e}")
-        continue
+        logging.error(f"Failed to fetch BMKG data: {e}")
+        return None
 
-    for t in tweets:
-        text = t.full_text.lower()
+# -----------------------------------------------------------
+# Step 2: Parse summary
+# -----------------------------------------------------------
+def summarize_weather(data):
+    try:
+        province = data["data"]["forecast"]["area"][0]
+        name = province["name"]
+        params = province["parameter"]
 
-        if user in last_seen and t.id <= last_seen[user]:
-            continue
+        weather = params[6]["timerange"][0]["value"][0]["#text"]
+        temp = params[5]["timerange"][0]["value"][0]["#text"]
 
-        if not any(k in text for k in KEYWORDS):
-            continue
+        summary = (
+            f"🌦️ *Prakiraan Cuaca Aceh*\n"
+            f"Wilayah: {name}\n"
+            f"Cuaca: {weather}\n"
+            f"Suhu: {temp}°C\n"
+            f"Sumber: BMKG"
+        )
 
-        try:
-            api.retweet(t.id)
-            print(f"Retweeted {t.id} from {user}")
-        except Exception as e:
-            print(f"Retweet error: {e}")
+        return summary
 
-        last_seen[user] = t.id
+    except Exception as e:
+        logging.error(f"Failed to summarize weather: {e}")
+        return None
 
-save_last(last_seen)
+# -----------------------------------------------------------
+# Step 3: Detect duplicate content
+# -----------------------------------------------------------
+def is_duplicate(text):
+    hash_val = hashlib.md5(text.encode()).hexdigest()
+    last = get_last_hash()
+    if last == hash_val:
+        return True
+    save_hash(hash_val)
+    return False
 
-print("=== DONE ===")
+# -----------------------------------------------------------
+# Step 4: Upload media (optional)
+# -----------------------------------------------------------
+def upload_media(image_path):
+    try:
+        media = client.media_upload(filename=image_path)
+        return media.media_id
+    except Exception as e:
+        logging.error(f"Media upload failed: {e}")
+        return None
+
+# -----------------------------------------------------------
+# Step 5: Post tweet
+# -----------------------------------------------------------
+def post_tweet(text, media_id=None):
+    try:
+        if media_id:
+            client.create_tweet(text=text, media_ids=[media_id])
+        else:
+            client.create_tweet(text=text)
+
+        logging.info("Tweet posted successfully")
+        print("Tweet posted successfully")
+
+    except Exception as e:
+        logging.error(f"Tweet failed: {e}")
+        print(f"Tweet failed: {e}")
+
+# -----------------------------------------------------------
+# MAIN PROCESS
+# -----------------------------------------------------------
+def main():
+    data = fetch_weather()
+    if not data:
+        print("Failed to fetch weather")
+        return
+
+    summary = summarize_weather(data)
+    if not summary:
+        print("Failed to summarize")
+        return
+
+    print(summary)
+
+    if is_duplicate(summary):
+        print("Duplicate detected, skipping tweet.")
+        logging.info("Duplicate tweet skipped")
+        return
+
+    post_tweet(summary)
+
+
+if __name__ == "__main__":
+    main()
+    print("=== DONE ===")
