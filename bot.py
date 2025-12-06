@@ -1,23 +1,22 @@
 import os
 import tweepy
-import requests
 from datetime import datetime
 
 print("=== Aceh Weather Bot Running ===")
 print(datetime.now())
 
-# Load environment variables
-API_KEY = os.environ.get("TWITTER_API_KEY")
-API_SECRET = os.environ.get("TWITTER_API_SECRET")
-ACCESS_TOKEN = os.environ.get("TWITTER_ACCESS_TOKEN")
-ACCESS_SECRET = os.environ.get("TWITTER_ACCESS_SECRET")
+# Load credentials
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
 
-# Authenticate (OAuth 1.0a for retweet)
+# Authenticate
 auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
 api = tweepy.API(auth)
 
-# Source accounts to monitor
-SOURCE_ACCOUNTS = [
+# Source accounts
+ACCOUNTS = [
     "infoBMKG",
     "BMKG_ACEH",
     "BMKG_Official",
@@ -27,85 +26,61 @@ SOURCE_ACCOUNTS = [
 
 # Aceh-related keywords
 KEYWORDS = [
-    "aceh", "banda aceh", "pidie", "pidie jaya", "bireuen", "lhokseumawe", "langsa",
-    "aceh utara", "aceh besar", "aceh barat", "aceh selatan", "aceh tenggara",
-    "simeulue", "sabussalam", "bener meriah", "aceh tengah", "gayo", "singkil"
+    "aceh", "banda aceh", "pidie", "pidie jaya",
+    "bireuen", "lhokseumawe", "langsa", "aceh utara",
+    "aceh besar", "simeulue", "meulaboh", "aceh barat"
 ]
 
-# Hashtags to append
-HASHTAGS = "#Aceh #BMKG #InfoGempa"
+# Track last tweets
+TRACK_FILE = "last_tweets.txt"
 
-# File to store last seen tweet IDs
-LAST_TWEET_FILE = "last_tweets.txt"
-
-# Initialize storage
-if not os.path.exists(LAST_TWEET_FILE):
-    with open(LAST_TWEET_FILE, "w") as f:
+if not os.path.exists(TRACK_FILE):
+    with open(TRACK_FILE, "w") as f:
         f.write("")
 
-def load_last_seen():
-    if not os.path.exists(LAST_TWEET_FILE):
-        return {}
-    with open(LAST_TWEET_FILE) as f:
-        lines = f.read().splitlines()
-        data = {}
-        for line in lines:
+def load_last():
+    data = {}
+    with open(TRACK_FILE, "r") as f:
+        for line in f:
             if ":" in line:
-                user, tweet_id = line.split(":")
-                data[user] = int(tweet_id)
-        return data
+                user, tid = line.strip().split(":")
+                data[user] = int(tid)
+    return data
 
-def save_last_seen(data):
-    with open(LAST_TWEET_FILE, "w") as f:
-        for user, tweet_id in data.items():
-            f.write(f"{user}:{tweet_id}\n")
+def save_last(data):
+    with open(TRACK_FILE, "w") as f:
+        for user, tid in data.items():
+            f.write(f"{user}:{tid}\n")
 
-last_seen = load_last_seen()
+last_seen = load_last()
 
-# === PROCESS EACH SOURCE ACCOUNT ===
-for username in SOURCE_ACCOUNTS:
-    print(f"Checking {username}...")
+# === MAIN LOOP ===
+for user in ACCOUNTS:
+    print(f"Checking {user}...")
 
     try:
-        # Fetch latest tweets
-        tweets = api.user_timeline(
-            screen_name=username,
-            count=5,
-            tweet_mode="extended"
-        )
+        tweets = api.user_timeline(screen_name=user, count=5, tweet_mode="extended")
     except Exception as e:
-        print(f"Error checking {username}: {e}")
+        print(f"Error checking {user}: {e}")
         continue
 
-    for tweet in tweets:
-        text = tweet.full_text.lower()
+    for t in tweets:
+        text = t.full_text.lower()
 
-        # Skip if already retweeted
-        if username in last_seen and tweet.id <= last_seen[username]:
+        if user in last_seen and t.id <= last_seen[user]:
             continue
 
-        # Filter relevant tweets
-        if not any(keyword in text for keyword in KEYWORDS):
+        if not any(k in text for k in KEYWORDS):
             continue
 
-        # Retweet
         try:
-            api.retweet(tweet.id)
-            print(f"Retweeted: {tweet.id}")
-
-            # Optional: Post a quote tweet with extra hashtags
-            api.update_status(
-                status=f"{HASHTAGS}",
-                attachment_url=f"https://twitter.com/{username}/status/{tweet.id}"
-            )
-
+            api.retweet(t.id)
+            print(f"Retweeted {t.id} from {user}")
         except Exception as e:
-            print(f"Retweet failed: {e}")
+            print(f"Retweet error: {e}")
 
-        # Update last seen
-        last_seen[username] = tweet.id
+        last_seen[user] = t.id
 
-# Save last seen
-save_last_seen(last_seen)
+save_last(last_seen)
 
 print("=== DONE ===")
