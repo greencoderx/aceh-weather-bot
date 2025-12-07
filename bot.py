@@ -1,7 +1,8 @@
 import tweepy
 import os
+import json
 
-# X API v2 credentials from GitHub secrets
+# Credentials
 BEARER_TOKEN = os.getenv("BEARER_TOKEN")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 ACCESS_SECRET = os.getenv("ACCESS_SECRET")
@@ -17,16 +18,21 @@ client = tweepy.Client(
     wait_on_rate_limit=True
 )
 
-# Trusted source usernames
+# Source accounts
 SOURCE_USERNAMES = [
-    "infoBMKG",
-    "BMKG_ACEH",
-    "BMKG_Official",
-    "BNPB_Indonesia",
-    "BPBD_Aceh"
+    "infoBMKG", "BMKG_ACEH", "BMKG_Official",
+    "BNPB_Indonesia", "BPBD_Aceh"
 ]
 
-# Aceh keywords (all Kabupaten/Kota)
+# Load last seen tweet IDs
+LAST_SEEN_FILE = "last_seen.json"
+if os.path.exists(LAST_SEEN_FILE):
+    with open(LAST_SEEN_FILE, "r") as f:
+        last_seen = json.load(f)
+else:
+    last_seen = {}
+
+# Keywords
 KEYWORDS = [
     "Aceh Barat", "Aceh Barat Daya", "Aceh Besar", "Aceh Jaya", "Aceh Selatan",
     "Aceh Singkil", "Aceh Tamiang", "Aceh Tengah", "Aceh Tenggara", "Aceh Timur",
@@ -35,45 +41,50 @@ KEYWORDS = [
     "Langsa", "Sabang", "Meulaboh"
 ]
 
-# Hashtags for visibility
 HASHTAGS = ["#AcehWeather", "#BMKG", "#CuacaAceh", "#InfoCuaca", "#AcehSiaga"]
 
-# File to store daily tweets
 DAILY_FILE = "daily_tweets.txt"
 
-def is_aceh_related(text):
-    return any(k.lower() in text.lower() for k in KEYWORDS)
 
-def save_for_digest(tweet_text):
+def save_for_digest(text):
     with open(DAILY_FILE, "a", encoding="utf-8") as f:
-        f.write(tweet_text + "\n---\n")
+        f.write(text + "\n---\n")
+
 
 def append_hashtags(text):
     return text + " " + " ".join(HASHTAGS)
 
-def get_user_ids(usernames):
-    user_ids = []
-    for username in usernames:
+
+def is_aceh_related(text):
+    return any(k.lower() in text.lower() for k in KEYWORDS)
+
+
+def get_user_ids():
+    ids = {}
+    for username in SOURCE_USERNAMES:
         try:
             user = client.get_user(username=username)
             if user.data:
-                user_ids.append(user.data.id)
-                print(f"Fetched ID for {username}: {user.data.id}")
-            else:
-                print(f"Could not fetch ID for {username}")
+                ids[username] = user.data.id
         except Exception as e:
             print(f"Error fetching {username}: {e}")
-    return user_ids
+    return ids
+
 
 def main():
-    SOURCE_IDS = get_user_ids(SOURCE_USERNAMES)
-    
-    for user_id in SOURCE_IDS:
+    global last_seen
+
+    user_ids = get_user_ids()
+
+    for username, uid in user_ids.items():
         try:
+            since_id = last_seen.get(username)
+
             tweets = client.get_users_tweets(
-                id=user_id,
+                id=uid,
+                since_id=since_id,
                 max_results=5,
-                tweet_fields=["id","text","created_at"]
+                tweet_fields=["id", "text", "created_at"]
             )
 
             if tweets.data:
@@ -82,11 +93,19 @@ def main():
                         try:
                             client.retweet(tweet.id)
                             save_for_digest(tweet.text)
-                            print(f"Retweeted tweet {tweet.id} from user {user_id}")
+                            print(f"Retweeted {tweet.id} from {username}")
                         except Exception as e:
-                            print("Error retweeting:", e)
+                            print("Retweet error:", e)
+
+                last_seen[username] = tweets.data[0].id
+
         except Exception as e:
-            print(f"Error fetching tweets from user {user_id}: {e}")
+            print(f"Error fetching tweets from {username}: {e}")
+
+    # Save updated last seen
+    with open(LAST_SEEN_FILE, "w") as f:
+        json.dump(last_seen, f)
+
 
 if __name__ == "__main__":
     main()
