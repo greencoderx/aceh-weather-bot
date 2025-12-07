@@ -1,6 +1,5 @@
 import tweepy
 import os
-from datetime import datetime
 
 # X API v2 credentials
 BEARER_TOKEN = os.getenv("BEARER_TOKEN")
@@ -20,24 +19,17 @@ client = tweepy.Client(
 
 DAILY_FILE = "daily_tweets.txt"
 HASHTAGS = ["#AcehWeather", "#BMKG", "#CuacaAceh", "#InfoCuaca", "#AcehSiaga"]
-LOG_FILE = "bot.log"
-
-def log(message):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{timestamp}] {message}\n")
-    print(f"[{timestamp}] {message}")
 
 def append_hashtags(text):
     return text + " " + " ".join(HASHTAGS)
 
 def post_daily_digest():
-    log("Starting daily digest.")
     try:
         with open(DAILY_FILE, "r", encoding="utf-8") as f:
             content = f.read().strip()
 
         if content:
+            # Split content into 270-char chunks to leave room for hashtags
             chunk_size = 270 - len(" ".join(HASHTAGS)) - 1
             lines = content.split("\n---\n")
             tweet_chunks = []
@@ -52,19 +44,13 @@ def post_daily_digest():
                 tweet_chunks.append(current_chunk.strip())
 
             for chunk in tweet_chunks:
-                try:
-                    client.create_tweet(text=append_hashtags(chunk))
-                    log("Posted digest tweet successfully.")
-                except Exception as e:
-                    log(f"Error posting digest tweet: {e}")
-            
+                client.create_tweet(text=append_hashtags(chunk))
+            print("Daily digest posted!")
             open(DAILY_FILE, "w").close()
-            log("Daily digest completed and file cleared.")
         else:
-            log("No tweets to post today for daily digest.")
-
+            print("No tweets to post today.")
     except FileNotFoundError:
-        log("Daily file not found, nothing to post.")
+        print("No daily file found.")
 
 if __name__ == "__main__":
     post_daily_digest()
