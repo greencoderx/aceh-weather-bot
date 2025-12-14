@@ -2,7 +2,7 @@ name: Aceh Weather Bot
 
 on:
   schedule:
-    - cron: "*/60 * * * *" # every 60 minutes
+    - cron: "*/180 * * * *" # every 60 minutes
   workflow_dispatch:
 
 jobs:
